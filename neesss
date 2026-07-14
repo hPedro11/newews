@@ -1,0 +1,457 @@
+# -*- coding: utf-8 -*-
+"""
+Central de Ferramentas — Precificação
+App unificado em PyQt5, no estilo do mockup aprovado.
+
+Estrutura deste arquivo (depois dá pra separar em módulos):
+  1. Constantes e folha de estilo (QSS)
+  2. Componentes reutilizáveis: PainelDatas, BarraAcoes, CaixaLog
+  3. Páginas: Home, ISIN (exemplo completo) e placeholders
+  4. Janela principal (sidebar + navegação + barra de status)
+
+Requisitos:  pip install PyQt5
+Executar:    python central_ferramentas.py
+"""
+
+import sys
+from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtGui import QFont, QColor
+from PyQt5.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QLabel, QListWidget, QListWidgetItem,
+    QStackedWidget, QHBoxLayout, QVBoxLayout, QGridLayout, QFrame,
+    QPushButton, QStatusBar, QGroupBox, QLineEdit, QRadioButton,
+    QTableWidget, QTableWidgetItem, QTextEdit, QSizePolicy, QHeaderView,
+)
+
+# ----------------------------------------------------------------------
+# 1. Constantes e estilo
+# ----------------------------------------------------------------------
+LARANJA = "#EC7000"
+LARANJA_HOVER = "#d46400"
+
+TOOLS = [
+    ("PRAAS Private",
+     "Verificação e consolidação de dados de ativos com posição na corretora."),
+    ("Ajuste de Opções Flexíveis",
+     "Ajustes nas opções flexíveis de ações — proventos e barreiras."),
+    ("Ajuste de ISIN",
+     "Verificação e consolidação de operações compromissadas sem ISIN."),
+    ("Exportação de Lastro",
+     "Exporta lastro de uma base para outra e consolida as informações em TXT."),
+]
+
+QSS = f"""
+QMainWindow {{ background: #ececec; }}
+
+/* ---------- Sidebar ---------- */
+QListWidget#sidebar {{
+    background: #2b2b2b; color: #e6e6e6; border: none;
+    font-size: 13px; outline: none;
+}}
+QListWidget#sidebar::item {{ padding: 13px 16px; border-left: 3px solid transparent; }}
+QListWidget#sidebar::item:hover {{ background: #3d3d3d; }}
+QListWidget#sidebar::item:selected {{
+    background: {LARANJA}; color: white; border-left: 3px solid white;
+}}
+QLabel#sidebarRodape {{
+    background: #2b2b2b; color: #8a8a8a; font-size: 11px;
+    padding: 12px 16px; border-top: 1px solid #3a3a3a;
+}}
+
+/* ---------- Grupos (fieldsets) ---------- */
+QGroupBox {{
+    background: #f7f7f7; border: 1px solid #c8c8c8; border-radius: 4px;
+    margin-top: 10px; padding: 10px 12px 12px 12px; font-size: 12px;
+}}
+QGroupBox::title {{ subcontrol-origin: margin; left: 8px; padding: 0 4px; color: #444; }}
+
+/* ---------- Botões laranja padrão ---------- */
+QPushButton[classe="acao"] {{
+    background: {LARANJA}; color: white; border: none; border-radius: 4px;
+    padding: 8px 18px; font-weight: 600; font-size: 12.5px;
+}}
+QPushButton[classe="acao"]:hover {{ background: {LARANJA_HOVER}; }}
+QPushButton[classe="secundario"] {{
+    background: #9e9e9e; color: white; border: none; border-radius: 4px;
+    padding: 8px 18px; font-weight: 600; font-size: 12.5px;
+}}
+QPushButton[classe="secundario"]:hover {{ background: #8a8a8a; }}
+QPushButton[classe="cinza"] {{
+    background: #e1e1e1; border: 1px solid #adadad; border-radius: 3px;
+    padding: 5px 14px; font-size: 12px;
+}}
+
+/* ---------- Campos ---------- */
+QLineEdit {{
+    border: 1px solid #adadad; border-radius: 3px; background: white;
+    padding: 5px 8px; font-size: 12.5px;
+}}
+
+/* ---------- Cards da home ---------- */
+QFrame[classe="card"] {{
+    background: white; border: 1px solid #c8c8c8; border-radius: 8px;
+}}
+QFrame[classe="card"]:hover {{ border: 1px solid {LARANJA}; }}
+QFrame[classe="card"] QLabel {{ border: none; background: transparent; }}
+
+/* ---------- Log e tabela ---------- */
+QTextEdit#log {{
+    background: white; border: 1px solid #c8c8c8; border-radius: 4px;
+    font-family: Consolas, monospace; font-size: 12px;
+}}
+QTableWidget {{ background: white; border: 1px solid #c8c8c8; font-size: 12.5px; }}
+QHeaderView::section {{
+    background: #f0f0f0; border: none; border-bottom: 1px solid #c8c8c8;
+    padding: 6px 10px; font-size: 12.5px;
+}}
+
+QStatusBar {{ background: #e4e4e4; border-top: 1px solid #c8c8c8; font-size: 12px; }}
+"""
+
+
+# ----------------------------------------------------------------------
+# 2. Componentes reutilizáveis (usados pelas 4 ferramentas)
+# ----------------------------------------------------------------------
+class PainelDatas(QGroupBox):
+    """Grupo 'Datas de referência' com pares rótulo + campo."""
+
+    def __init__(self, titulo="Datas de referência", campos=None, parent=None):
+        super().__init__(titulo, parent)
+        self.inputs = {}
+        v = QVBoxLayout(self)
+        for rotulo, valor in (campos or []):
+            h = QHBoxLayout()
+            lbl = QLabel(rotulo)
+            lbl.setFixedWidth(90)
+            campo = QLineEdit(valor)
+            self.inputs[rotulo] = campo
+            h.addWidget(lbl)
+            h.addWidget(campo)
+            v.addLayout(h)
+
+
+class BarraAcoes(QGroupBox):
+    """Grupo 'Ações' com os 4 botões padrão. Conecte pelos sinais."""
+
+    processar_clicado = pyqtSignal()
+    gerar_clicado = pyqtSignal()
+    limpar_clicado = pyqtSignal()
+    abrir_pasta_clicado = pyqtSignal()
+
+    def __init__(self, rotulo_pasta="Abrir Pasta de Saída", parent=None):
+        super().__init__("Ações", parent)
+        h = QHBoxLayout(self)
+
+        self.btn_processar = self._botao("Processar", "acao", self.processar_clicado)
+        self.btn_gerar = self._botao("Gerar", "secundario", self.gerar_clicado)
+        self.btn_limpar = self._botao("Limpar Processamento", "acao", self.limpar_clicado)
+        self.btn_pasta = self._botao(f"📁 {rotulo_pasta}", "acao", self.abrir_pasta_clicado)
+
+        for b in (self.btn_processar, self.btn_gerar, self.btn_limpar, self.btn_pasta):
+            h.addWidget(b)
+        h.addStretch()
+
+    def _botao(self, texto, classe, sinal):
+        btn = QPushButton(texto)
+        btn.setProperty("classe", classe)
+        btn.setCursor(Qt.PointingHandCursor)
+        btn.clicked.connect(sinal.emit)
+        return btn
+
+
+class CaixaLog(QGroupBox):
+    """Grupo 'Processamento' com log colorido ([INFO] azul, [AVISO] laranja)."""
+
+    def __init__(self, parent=None):
+        super().__init__("Processamento", parent)
+        v = QVBoxLayout(self)
+        self.texto = QTextEdit()
+        self.texto.setObjectName("log")
+        self.texto.setReadOnly(True)
+        self.texto.setFixedHeight(110)
+        v.addWidget(self.texto)
+
+    def info(self, msg):
+        self.texto.append(f'<span style="color:#1565c0;">[INFO] {msg}</span>')
+
+    def aviso(self, msg):
+        self.texto.append(
+            f'<span style="color:#e65100;font-weight:600;">[AVISO] {msg}</span>')
+
+    def limpar(self):
+        self.texto.clear()
+
+
+# ----------------------------------------------------------------------
+# 3. Páginas
+# ----------------------------------------------------------------------
+class HomePage(QWidget):
+    def __init__(self, abrir_ferramenta, parent=None):
+        super().__init__(parent)
+        v = QVBoxLayout(self)
+        v.setContentsMargins(24, 22, 24, 22)
+
+        titulo = QLabel("Central de Ferramentas — Precificação")
+        titulo.setFont(QFont("Segoe UI", 15, QFont.Bold))
+        sub = QLabel("Selecione uma ferramenta para começar.")
+        sub.setStyleSheet("color:#666; font-size:12.5px;")
+        v.addWidget(titulo)
+        v.addWidget(sub)
+        v.addSpacing(12)
+
+        grid = QGridLayout()
+        grid.setSpacing(14)
+        for i, (nome, desc) in enumerate(TOOLS):
+            grid.addWidget(self._card(nome, desc, i, abrir_ferramenta),
+                           i // 2, i % 2)
+        v.addLayout(grid)
+
+        # Painel de conexão Athena compartilhada
+        conexao = QFrame()
+        conexao.setProperty("classe", "card")
+        hc = QHBoxLayout(conexao)
+        hc.setContentsMargins(16, 12, 16, 12)
+        led = QLabel("●")
+        led.setStyleSheet("color:#4caf50; font-size:14px;")
+        txt = QLabel("<b>Conexão Athena:</b> ativa — compartilhada por todas as ferramentas.")
+        txt.setStyleSheet("font-size:12.5px;")
+        btn_testar = QPushButton("Testar conexão")
+        btn_testar.setProperty("classe", "cinza")
+        btn_testar.setCursor(Qt.PointingHandCursor)
+        hc.addWidget(led)
+        hc.addWidget(txt)
+        hc.addStretch()
+        hc.addWidget(btn_testar)
+        v.addSpacing(14)
+        v.addWidget(conexao)
+        v.addStretch()
+
+    def _card(self, nome, desc, indice, abrir_ferramenta):
+        card = QFrame()
+        card.setProperty("classe", "card")
+        card.setMinimumHeight(130)
+        card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        cv = QVBoxLayout(card)
+        cv.setContentsMargins(16, 14, 16, 14)
+
+        lbl_nome = QLabel(nome)
+        lbl_nome.setFont(QFont("Segoe UI", 11, QFont.Bold))
+        lbl_desc = QLabel(desc)
+        lbl_desc.setWordWrap(True)
+        lbl_desc.setStyleSheet("color:#666; font-size:12.5px;")
+
+        btn = QPushButton("Abrir")
+        btn.setProperty("classe", "acao")
+        btn.setCursor(Qt.PointingHandCursor)
+        btn.clicked.connect(lambda _, ix=indice: abrir_ferramenta(ix))
+
+        cv.addWidget(lbl_nome)
+        cv.addWidget(lbl_desc)
+        cv.addStretch()
+        cv.addWidget(btn, alignment=Qt.AlignRight)
+        return card
+
+
+class IsinPage(QWidget):
+    """Exemplo completo do padrão — substitua os dados fake pela sua lógica
+    (isin_backend.py entra aqui quase sem mudança)."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        v = QVBoxLayout(self)
+        v.setContentsMargins(24, 20, 24, 20)
+        v.setSpacing(4)
+
+        titulo = QLabel("ISIN — Preenchimento de Títulos Públicos")
+        titulo.setFont(QFont("Segoe UI", 14, QFont.Bold))
+        sub = QLabel("Fonte do ISIN: AWS Athena (cad_cadastro_selic_sor).")
+        sub.setStyleSheet("color:#666; font-size:12.5px;")
+        v.addWidget(titulo)
+        v.addWidget(sub)
+        v.addSpacing(6)
+
+        # Datas de referência (componente compartilhado)
+        self.datas = PainelDatas(
+            "Datas de referência (posição — aplicadas no Athena)",
+            campos=[("Data inicial:", "13/07/2026"), ("Data final:", "13/07/2026")],
+        )
+        v.addWidget(self.datas)
+
+        # Parâmetros
+        parametros = QGroupBox("Parâmetros")
+        hp = QHBoxLayout(parametros)
+        hp.addWidget(QLabel("Sigla:"))
+        self.sigla = QLineEdit("LZ")
+        self.sigla.setFixedWidth(80)
+        hp.addWidget(self.sigla)
+        hp.addSpacing(18)
+        self.rb_athena = QRadioButton("AWS Athena")
+        self.rb_athena.setChecked(True)
+        self.rb_csv = QRadioButton("CSV de títulos públicos — backup")
+        hp.addWidget(self.rb_athena)
+        hp.addWidget(self.rb_csv)
+        hp.addStretch()
+        v.addWidget(parametros)
+
+        # Ações (componente compartilhado)
+        self.acoes = BarraAcoes()
+        self.acoes.processar_clicado.connect(self.processar)
+        self.acoes.limpar_clicado.connect(self.limpar)
+        v.addWidget(self.acoes)
+
+        # Prévia
+        previa = QGroupBox("Prévia dos dados processados — Posições sem ISIN")
+        vp = QVBoxLayout(previa)
+        self.tabela = QTableWidget(0, 3)
+        self.tabela.setHorizontalHeaderLabels(["Código", "Título", "Status"])
+        self.tabela.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.tabela.verticalHeader().setVisible(False)
+        self.tabela.setFixedHeight(130)
+        vp.addWidget(self.tabela)
+        v.addWidget(previa)
+
+        # Log (componente compartilhado)
+        self.log = CaixaLog()
+        v.addWidget(self.log)
+        v.addStretch()
+
+    # ---- Ações de exemplo (troque pela chamada ao seu backend) ----
+    def processar(self):
+        self.limpar()
+        dados = [
+            ("5320746", "LTN 2027", "ISIN preenchido"),
+            ("5322715", "NTN-B 2030", "ISIN preenchido"),
+            ("5323243", "LFT 2028", "SEM ISIN"),
+        ]
+        for codigo, nome, status in dados:
+            linha = self.tabela.rowCount()
+            self.tabela.insertRow(linha)
+            self.tabela.setItem(linha, 0, QTableWidgetItem(codigo))
+            self.tabela.setItem(linha, 1, QTableWidgetItem(nome))
+            item = QTableWidgetItem(status)
+            if status == "SEM ISIN":
+                item.setBackground(QColor("#fdecea"))
+                item.setForeground(QColor("#b71c1c"))
+            else:
+                item.setBackground(QColor("#e6f4e6"))
+                item.setForeground(QColor("#1b5e20"))
+            self.tabela.setItem(linha, 2, item)
+
+        self.log.info("Posições carregadas do Athena: 128")
+        self.log.info("ISIN preenchidos: 127")
+        self.log.aviso("1 posição sem ISIN — verificar código 5323243")
+        self.log.info("Processamento finalizado.")
+
+    def limpar(self):
+        self.tabela.setRowCount(0)
+        self.log.limpar()
+
+
+class PlaceholderPage(QWidget):
+    """Página temporária — troque pela tela real da ferramenta."""
+
+    def __init__(self, titulo, fonte, texto, parent=None):
+        super().__init__(parent)
+        v = QVBoxLayout(self)
+        v.setContentsMargins(24, 20, 24, 20)
+
+        lbl_titulo = QLabel(titulo)
+        lbl_titulo.setFont(QFont("Segoe UI", 14, QFont.Bold))
+        lbl_fonte = QLabel(fonte)
+        lbl_fonte.setStyleSheet("color:#666; font-size:12.5px;")
+
+        aviso = QLabel(texto)
+        aviso.setWordWrap(True)
+        aviso.setStyleSheet(
+            "background:#FFF3E0; border:1px solid #EC7000; border-radius:6px;"
+            "padding:14px; color:#8a4b00; font-size:13px;"
+        )
+        v.addWidget(lbl_titulo)
+        v.addWidget(lbl_fonte)
+        v.addSpacing(10)
+        v.addWidget(aviso)
+        v.addStretch()
+
+
+# ----------------------------------------------------------------------
+# 4. Janela principal
+# ----------------------------------------------------------------------
+class MainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Central de Ferramentas — Precificação")
+        self.resize(1240, 780)
+
+        central = QWidget()
+        self.setCentralWidget(central)
+        h = QHBoxLayout(central)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(0)
+
+        # --- Sidebar (lista + rodapé) ---
+        coluna = QVBoxLayout()
+        coluna.setContentsMargins(0, 0, 0, 0)
+        coluna.setSpacing(0)
+
+        self.sidebar = QListWidget()
+        self.sidebar.setObjectName("sidebar")
+        self.sidebar.setFixedWidth(225)
+        self.sidebar.addItem(QListWidgetItem("🏠  Início"))
+        for nome, _ in TOOLS:
+            self.sidebar.addItem(QListWidgetItem(f"🔧  {nome}"))
+
+        rodape = QLabel("●  Athena conectado  ·  v1.0")
+        rodape.setObjectName("sidebarRodape")
+        rodape.setFixedWidth(225)
+
+        coluna.addWidget(self.sidebar)
+        coluna.addWidget(rodape)
+
+        # --- Páginas ---
+        self.paginas = QStackedWidget()
+        self.paginas.addWidget(HomePage(self.abrir_ferramenta))          # 0
+        self.paginas.addWidget(PlaceholderPage(                          # 1
+            "PRAAS Private — Novos Instrumentos Financeiros",
+            "Fonte de dados: AWS Athena.",
+            "Sua tela atual entra aqui sem mudanças — as abas internas "
+            "(AWS · PRAAS Private · Operações Corretora · MTM Compra) "
+            "continuam existindo dentro desta página, com QTabWidget."))
+        self.paginas.addWidget(PlaceholderPage(                          # 2
+            "Ajuste de Opções Flexíveis — Proventos e Barreiras",
+            "Fonte de dados: Excel de proventos, PROD.DAT e AWS Athena via ODBC.",
+            "Sua tela atual entra aqui: seleção do Excel e do PROD.DAT, data de "
+            "cálculo, ações, prévia (Ativos em EX × Validação PROD) e log."))
+        self.paginas.addWidget(IsinPage())                               # 3
+        self.paginas.addWidget(PlaceholderPage(                          # 4
+            "Exportação de Lastro",
+            "Fonte de dados: AWS Athena.",
+            "Sua tela atual entra aqui: tipo de carteira, base de destino/atual, "
+            "códigos de lastro, datas D0/D-1/D-5, ações e log de processamento."))
+
+        self.sidebar.currentRowChanged.connect(self.trocar_pagina)
+        self.sidebar.setCurrentRow(0)
+
+        h.addLayout(coluna)
+        h.addWidget(self.paginas, stretch=1)
+
+        self.setStatusBar(QStatusBar())
+        self.statusBar().showMessage("Pronto — aguardando ação do usuário.")
+
+    def trocar_pagina(self, indice):
+        self.paginas.setCurrentIndex(indice)
+        if indice == 0:
+            self.statusBar().showMessage("Pronto — aguardando ação do usuário.")
+        else:
+            self.statusBar().showMessage(f"{TOOLS[indice - 1][0]} — pronto.")
+
+    def abrir_ferramenta(self, indice_ferramenta):
+        self.sidebar.setCurrentRow(indice_ferramenta + 1)
+
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    app.setStyle("Fusion")
+    app.setStyleSheet(QSS)
+    janela = MainWindow()
+    janela.show()
+    sys.exit(app.exec_())
