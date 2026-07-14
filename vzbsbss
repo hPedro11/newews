@@ -1,0 +1,12 @@
+central_ferramentas/
+├── main.py                  # o esqueleto que te passei
+├── requirements.txt         # 1 venv só, em vez de 4
+├── core/
+│   └── athena.py            # conexão ODBC compartilhada
+├── tools/
+│   ├── praas/               # boletagem, corretora, emissores,
+│   │                        #   private, interface (Central Cad)
+│   ├── op_flex/             # op_flex.py + interface_opcoes_flexiveis.py
+│   ├── isin/                # isin_backend.py + isin_interface.py
+│   └── export_lastro/       # backend_export.py + interface_export.py
+└── arquivos/                # Backup/, RB/, saídas — separados por ferramenta
